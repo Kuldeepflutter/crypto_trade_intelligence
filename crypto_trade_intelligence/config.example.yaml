@@ -1,0 +1,72 @@
+# Copy to config.yaml. Every key is optional; defaults are shown. Secrets live in .env, never here.
+# NO API KEY IS NEEDED for scanning, alerts to console, paper trading or backtests (Binance public endpoints).
+
+# Used only when universe.mode is "fixed" (or when you run:  python app.py scan --symbols BTCUSDT,ETHUSDT)
+symbols: [BTCUSDT, ETHUSDT, SOLUSDT]
+scan_interval_seconds: 60
+
+universe:
+  mode: all                     # all = every TRADING USDT perpetual on the exchange; fixed = use `symbols`
+  max_symbols: 200              # after filters, highest 24h volume first (raise it, or set strategy.min_volume_24h_usd: 0, for literally everything)
+  min_listing_days: 45          # 4h EMA200 needs ~35 days of history
+  exclude: [USDCUSDT]
+  triage_refresh_seconds: 900   # cheap 1h/4h bias check per coin, refreshed this often
+  max_deep_scans_per_cycle: 30  # full scans per cycle (rotating, so every coin is covered over time)
+  concurrency: 4
+
+exchange:
+  name: binance_usdm            # binance_usdm | ccxt (ccxt: no long/short ratio -> SHORTs impossible)
+  requests_per_second: 8
+  weight_per_minute: 1800       # request-weight budget (Binance hard limit is 2400/min/IP)
+  data_requests_per_5min: 900   # /futures/data/* budget (hard limit ~1000 per 5 min/IP)
+  live_feed: true               # public WebSocket: ACTUAL liquidation events + mark prices (no key)
+
+ratio:
+  kind: global_account          # global_account | top_trader_account | top_trader_position (never mixed)
+  period: 5m
+  max_age_seconds: 1200         # older than this = stale = SHORT prohibited
+  # NOTE: the SHORT threshold (ratio >= 1.0) is deliberately NOT configurable.
+
+liquidation:
+  provider: public_model        # public_model = NO KEY (estimate from public OI + L/S ratio + leverage-mix assumption)
+                                # file / http_json = licensed vendor data (e.g. CoinGlass, key needed) | none
+  model:
+    period: 15m
+    bucket_pct: 0.25
+    leverage_mix: {5: 0.10, 10: 0.30, 25: 0.30, 50: 0.20, 100: 0.10}   # ASSUMPTION - edit to taste
+  path_template: data/heatmaps/{symbol}.json      # file provider: [{price, notional_usd, side, timestamp}, ...]
+  # url_template: "https://<vendor>/<endpoint>?symbol={symbol}"   # http_json provider (key from LIQ_API_KEY)
+
+strategy:
+  liquidation_mode: required    # required: no heatmap data -> no trade.  optional: trade without it, labelled REDUCED-FEATURE
+  require_orderbook: true
+  min_score: 65
+  min_rr: 2.0                   # net of fees, slippage and funding
+  min_volume_24h_usd: 20000000  # liquidity floor (also the universe filter). 0 = no floor
+  max_spread_bps: 8
+  min_depth_notional_usd: 100000
+
+risk:
+  account_equity: 10000
+  risk_per_trade_pct: 0.5
+  leverage: 5
+  margin_allocation_pct: 20
+  max_daily_loss_pct: 2.0       # kill switch: no new entries after this realized daily loss
+  max_positions: 3
+  max_total_exposure_pct: 300
+  max_slippage_pct: 0.05
+  taker_fee: 0.0005
+  maker_fee: 0.0002
+
+execution:
+  mode: analysis                # analysis (default) | paper | live
+  exchange_testnet: true
+
+alerts:
+  telegram_enabled: false       # false = alerts print to the console (no Telegram token needed)
+  cooldown_minutes: 60
+
+storage:
+  db_path: data/trade_intel.sqlite3
+  log_dir: logs
+  log_level: INFO
